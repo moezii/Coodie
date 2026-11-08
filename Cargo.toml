@@ -6,6 +6,8 @@ rust-version = "1.85"
 description = "Deterministic static audit of a repository: what it exposes, what nobody can account for, what no test reaches, and which tests cannot fail."
 license = "AGPL-3.0-or-later"
 readme = "README.md"
+repository = "https://github.com/moezii/Coodie"
+homepage = "https://github.com/moezii/Coodie"
 keywords = ["static-analysis", "audit", "dead-code", "tree-sitter", "testing"]
 categories = ["command-line-utilities", "development-tools"]
 
