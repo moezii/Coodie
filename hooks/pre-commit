@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# Codie pre-commit hook.
+#
+# Install:
+#   cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# A warm audit of a small or mid-sized repository (up to a few thousand
+# symbols) takes well under a second; very large repositories take several
+# seconds even warm (see BENCHMARKS.md). The first run in a fresh clone is
+# slower because nothing is cached.
+#
+# Set CODIE_MIN_SCORE to change the bar. Set CODIE_SKIP=1 to bypass once,
+# which is better than people deleting the hook the first time it blocks them.
+
+set -e
+
+[ -n "$CODIE_SKIP" ] && exit 0
+
+CODIE="${CODIE_BIN:-./target/release/codereader}"
+MIN_SCORE="${CODIE_MIN_SCORE:-60}"
+
+if [ ! -x "$CODIE" ]; then
+    CODIE="$(command -v codereader 2>/dev/null || true)"
+fi
+
+if [ -z "$CODIE" ] || [ ! -x "$CODIE" ]; then
+    echo "codie: binary not found, skipping audit (build it with 'cargo build --release')"
+    exit 0
+fi
+
+# The audit reads the working tree, which is what is about to be committed for
+# a normal `git commit -a`. For a partial staging this is approximate — the
+# real gate is the CI job, which sees exactly the merge result.
+if ! "$CODIE" audit . --fail-under "$MIN_SCORE" --limit 5; then
+    echo
+    echo "codie: commit blocked. Fix the above, lower CODIE_MIN_SCORE, or"
+    echo "       bypass this once with CODIE_SKIP=1 git commit ..."
+    exit 1
+fi

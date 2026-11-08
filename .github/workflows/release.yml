@@ -1,0 +1,118 @@
+name: Release
+
+# Builds codereader for Linux, macOS and Windows when a version tag is pushed
+# (for example v0.1.0) and attaches the archives to a GitHub release whose notes
+# come from that version's section in CHANGELOG.md.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Read-only by default. Only the job that publishes the release can write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches Cargo.toml
+        shell: bash
+        run: |
+          crate_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v${crate_version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${crate_version}"
+            exit 1
+          fi
+
+      # rustup ships on every hosted runner, so no third-party action is needed.
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          name="codereader-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "dist/${name}"
+          cp README.md LICENSE CHANGELOG.md "dist/${name}/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/codereader.exe" "dist/${name}/"
+            (cd dist && 7z a -tzip "${name}.zip" "${name}" > /dev/null)
+            archive="dist/${name}.zip"
+          else
+            cp "target/${{ matrix.target }}/release/codereader" "dist/${name}/"
+            tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+            archive="dist/${name}.tar.gz"
+          fi
+          if command -v sha256sum > /dev/null; then
+            sha256sum "${archive}" | sed 's| dist/| |' > "${archive}.sha256"
+          else
+            shasum -a 256 "${archive}" | sed 's| dist/| |' > "${archive}.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codereader-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found && /^\[[^]]+\]: /         { exit }
+            found                           { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "No CHANGELOG.md section for ${version}"
+            exit 1
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "Codie ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --verify-tag

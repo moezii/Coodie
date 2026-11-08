@@ -1,0 +1,8 @@
+/target/
+.codereader/
+.env
+.env.*
+!.env.example
+/bench/repos/
+/bench/raw/
+/bench/venv/

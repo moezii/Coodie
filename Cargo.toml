@@ -1,0 +1,50 @@
+[package]
+name = "codereader"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Deterministic static audit of a repository: what it exposes, what nobody can account for, what no test reaches, and which tests cannot fail."
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+keywords = ["static-analysis", "audit", "dead-code", "tree-sitter", "testing"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap = { version = "4.4.18", features = ["derive"] }
+globset = "0.4.14"
+ignore = "0.4.22"
+notify = "6.1.1"
+rusqlite = { version = "0.30.0", features = ["bundled"] }
+serde = { version = "1.0.196", features = ["derive"] }
+serde_json = "1.0.113"
+sha2 = "0.10.8"
+streaming-iterator = "0.1.9"
+thiserror = "1.0.56"
+tree-sitter = "0.25"
+tree-sitter-bash = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-css = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-html = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-json = "0.24"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-ocaml = "0.24"
+tree-sitter-php = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-r = "1"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-scala = "0.23"
+tree-sitter-swift = "0.7"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-typescript = "0.23"
+ureq = { version = "2.9.6", features = ["json"] }
+url = "2.5.2"
+zeroize = "1.8.1"
+
+[dev-dependencies]
+tempfile = "3.10.1"

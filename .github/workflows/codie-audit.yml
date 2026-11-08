@@ -1,0 +1,114 @@
+name: Codie audit
+
+# Fails the build when a change makes the repository worse than it was before
+# the change. Nothing else. No absolute score bar, so an existing backlog does
+# not block anyone — only new damage does.
+#
+# Deterministic and offline: no model, no API key, no network.
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      # The comparison needs the previous commit, so a shallow clone is not
+      # enough.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # rustup ships on every hosted runner, so no third-party action is needed.
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      # Third-party action pinned to a full commit SHA.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build
+        run: cargo build --release
+
+      # Parse cache entries are keyed by content hash, so one restored from any
+      # branch is valid. Without this every run is a cold audit, which on a
+      # small or mid-sized repository is roughly 10x slower than a warm one.
+      - uses: actions/cache@v4
+        with:
+          path: .codereader
+          key: codie-cache-${{ github.sha }}
+          restore-keys: codie-cache-
+
+      # What to compare against:
+      #   pull_request -> the branch being merged into
+      #   push         -> the commit immediately before this one
+      - name: Work out the "before" commit
+        id: before
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Audit that commit in a separate worktree. This is self-contained —
+      # nothing is carried between CI runs, so the comparison cannot drift.
+      - name: Audit the "before" state
+        id: baseline
+        run: |
+          SHA="${{ steps.before.outputs.sha }}"
+          # First push to a branch has no before commit (all zeroes).
+          if [ -z "$SHA" ] || [ "$SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A merge commit has two parents, and "before" is only one of them.
+          # Comparing the merged result against one side reports everything
+          # from the other side as new, every time. The branch was already
+          # gated on its own pushes and on the pull request, so there is
+          # nothing left to catch here.
+          if [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ]; then
+            echo "merge commit — already gated before the merge, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A force-push (rebase, amend, rewritten history) leaves "before"
+          # pointing at a commit that no longer exists. Compare against this
+          # commit's parent instead; with no parent there is nothing to compare.
+          if ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+            if PARENT=$(git rev-parse -q --verify "HEAD^"); then
+              echo "before commit $SHA no longer exists (history rewritten); comparing against the parent commit $PARENT"
+              SHA="$PARENT"
+            else
+              echo "before commit $SHA no longer exists and this commit has no parent, skipping"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          git worktree add /tmp/before "$SHA"
+          ./target/release/codereader audit /tmp/before --json > /tmp/baseline.json
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Audit this commit
+        run: ./target/release/codereader audit . --limit 0
+
+      # The gate. Exits 1 if the score dropped or an entrypoint that used to be
+      # tested no longer is.
+      - name: Fail if this change made things worse
+        if: steps.baseline.outputs.skip == 'false'
+        run: ./target/release/codereader audit . --baseline /tmp/baseline.json
+
+      - name: Save the report
+        if: always()
+        run: ./target/release/codereader audit . --report > audit-report.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codie-audit-report
+          path: audit-report.md
